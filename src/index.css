@@ -55,7 +55,9 @@ html { background: var(--bg); }
 }
 
 /* zonas seguras del celular (muesca, barra inferior) */
-.app-shell { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.app-shell { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.tabular-nums { font-variant-numeric: tabular-nums; }
 
 body {
   font-family: 'DM Sans', system-ui, sans-serif;

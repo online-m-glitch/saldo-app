@@ -9,6 +9,11 @@ import {
 } from './lib/calc'
 import { supabase, redirectUrl, errorAuth } from './lib/supabase'
 import { useNube, borrarLocal } from './lib/store'
+import { useInstalar, type ModoInstalar } from './lib/instalar'
+import {
+  BadgeCategoria, IconoCategoria, IconoInicio, IconoHistorial, IconoReportes, IconoMas,
+  IconoDescargar, IconoCompartirIOS, IconoAgregarInicio, IconoMenuAndroid,
+} from './lib/iconos'
 
 /* ─── Categorías (base + propias del usuario) ────────────────────────────── */
 
@@ -692,8 +697,8 @@ function OnboardingScreen({
 
 /* ─── Menu drawer ────────────────────────────────────────────────────────── */
 
-function MenuDrawer({ name, email, darkMode, onToggleDark, onNavigate, onClose, onLogout }: {
-  name: string; email: string; darkMode: boolean; onToggleDark: () => void
+function MenuDrawer({ name, email, darkMode, onToggleDark, onNavigate, onClose, onLogout, onInstall }: {
+  name: string; email: string; darkMode: boolean; onToggleDark: () => void; onInstall?: () => void
   onNavigate: (s: Screen) => void; onClose: () => void; onLogout: () => void
 }) {
   const items: { icon: React.ReactNode; label: string; screen: Screen }[] = [
@@ -731,6 +736,14 @@ function MenuDrawer({ name, email, darkMode, onToggleDark, onNavigate, onClose, 
               <span className="font-medium">{item.label}</span>
             </button>
           ))}
+          {onInstall && (
+            <button onClick={onInstall}
+              className="w-full flex items-center gap-4 px-6 py-4 transition-colors duration-150 text-left active:scale-[0.98]"
+              style={{ color: 'var(--fg)', borderTop: '1px solid var(--divider)' }}>
+              <span className="text-[#E8A33D]"><IconoDescargar /></span>
+              <span className="font-medium">Instalar app en el celular</span>
+            </button>
+          )}
           {/* Dark mode toggle row */}
           <div className="flex items-center gap-4 px-6 py-4" style={{ borderTop: '1px solid var(--divider)' }}>
             <span style={{ color: 'var(--muted)' }}>{darkMode ? <IconSun /> : <IconMoon />}</span>
@@ -759,36 +772,128 @@ type Mov = { kind: 'gasto'; item: Expense } | { kind: 'ingreso'; item: Income }
 function MovRow({ mov, isLast, onDelete, onEdit }: {
   mov: Mov; isLast: boolean; onDelete: (mov: Mov) => void; onEdit: (mov: Mov) => void
 }) {
-  const [hovered, setHovered] = useState(false)
   const { categories } = useCategories()
   const esIngreso = mov.kind === 'ingreso'
   const cat = esIngreso ? null : catInfo(mov.item.category, categories)
   const titulo = mov.item.concept || (esIngreso ? 'Ingreso extra' : cat!.label)
+  const iconId = esIngreso ? 'ingreso' : (CATS.some(c => c.id === cat!.id) ? cat!.id : 'otros')
   return (
-    <div
-      className="flex items-center gap-3 px-4 py-3.5 transition-colors duration-150"
-      style={{ borderBottom: !isLast ? '1px solid var(--divider)' : 'none', background: hovered ? 'var(--subtle)' : 'transparent' }}
-      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: esIngreso ? '#22C55E' : cat!.color }} />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate" style={{ color: 'var(--fg)' }}>{titulo}</p>
-        <p className="text-xs" style={{ color: 'var(--muted)' }}>{esIngreso ? 'Ingreso extra' : cat!.label}</p>
-      </div>
-      <span className="text-sm font-semibold flex-shrink-0" style={{ color: esIngreso ? '#16A34A' : 'var(--fg)' }}>
-        {esIngreso ? '+' : ''}{fmt(mov.item.amount)}
-      </span>
-      <div className="flex items-center gap-1">
-        <button onClick={() => onEdit(mov)} aria-label={`Editar ${titulo}`}
-          className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--subtle)] transition-all flex-shrink-0 active:scale-90 ${hovered ? 'opacity-100' : 'opacity-60'}`}
-          style={{ color: 'var(--muted)' }}>
-          <IconEdit />
-        </button>
-        <button onClick={() => onDelete(mov)} aria-label={`Eliminar ${titulo}`}
-          className={`w-8 h-8 rounded-full flex items-center justify-center text-red-400 hover:bg-red-500/10 transition-all flex-shrink-0 active:scale-90 ${hovered ? 'opacity-100' : 'opacity-60'}`}>
-          <IconX />
-        </button>
-      </div>
+    <div className="flex items-center" style={{ borderBottom: !isLast ? '1px solid var(--divider)' : 'none' }}>
+      <button onClick={() => onEdit(mov)} aria-label={`Editar ${titulo}`}
+        className="flex-1 min-w-0 flex items-center gap-3 pl-4 pr-2 py-3 text-left transition-colors duration-150 hover:bg-[var(--subtle)] active:bg-[var(--subtle)]">
+        <BadgeCategoria id={iconId} color={esIngreso ? '#16A34A' : cat!.color} />
+        <div className="flex-1 min-w-0">
+          <p className="text-[15px] font-medium truncate" style={{ color: 'var(--fg)' }}>{titulo}</p>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>{esIngreso ? 'Ingreso extra' : cat!.label}</p>
+        </div>
+        <span className="text-[15px] font-semibold flex-shrink-0 tabular-nums" style={{ color: esIngreso ? '#16A34A' : 'var(--fg)' }}>
+          {esIngreso ? '+' : ''}{fmt(mov.item.amount)}
+        </span>
+      </button>
+      <button onClick={() => onDelete(mov)} aria-label={`Eliminar ${titulo}`}
+        className="w-11 h-11 mr-1.5 rounded-full flex items-center justify-center flex-shrink-0 transition-all active:scale-90 hover:bg-red-500/10"
+        style={{ color: 'var(--muted)' }}
+        onMouseEnter={e => (e.currentTarget.style.color = '#EF4444')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}>
+        <IconX />
+      </button>
     </div>
+  )
+}
+
+/* ─── Barra inferior ─────────────────────────────────────────────────────── */
+
+type Tab = 'home' | 'history' | 'reports'
+
+function BottomNav({ actual, onTab, onAdd, onMenu }: {
+  actual: Screen; onTab: (t: Tab) => void; onAdd: () => void; onMenu: () => void
+}) {
+  const item = (t: Tab, label: string, icon: React.ReactNode) => {
+    const activo = actual === t
+    return (
+      <button onClick={() => onTab(t)} aria-label={label} aria-current={activo ? 'page' : undefined}
+        className="flex-1 flex flex-col items-center justify-center gap-0.5 h-full transition-colors active:scale-95"
+        style={{ color: activo ? 'var(--fg)' : 'var(--muted)' }}>
+        {icon}
+        <span className={`text-[11px] ${activo ? 'font-bold' : 'font-medium'}`}>{label}</span>
+      </button>
+    )
+  }
+  return (
+    <nav className="flex-shrink-0 relative z-10"
+      style={{ background: 'var(--card)', borderTop: '1px solid var(--divider)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <div className="flex items-stretch h-16">
+        {item('home', 'Inicio', <IconoInicio />)}
+        {item('history', 'Historial', <IconoHistorial />)}
+        <div className="flex-1 flex items-center justify-center">
+          <button onClick={onAdd} aria-label="Agregar gasto o ingreso"
+            className="w-14 h-14 -mt-7 rounded-full bg-[#E8A33D] flex items-center justify-center transition-transform duration-150 active:scale-90 hover:scale-105 fab-animated"
+            style={{ boxShadow: '0 0 0 5px var(--bg)' }}>
+            <svg width="24" height="24" viewBox="0 0 22 22" fill="none">
+              <path d="M11 3V19M3 11H19" stroke={ON_ACCENT} strokeWidth="2.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+        {item('reports', 'Reportes', <IconoReportes />)}
+        <button onClick={onMenu} aria-label="Más opciones"
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 h-full active:scale-95" style={{ color: 'var(--muted)' }}>
+          <IconoMas />
+          <span className="text-[11px] font-medium">Más</span>
+        </button>
+      </div>
+    </nav>
+  )
+}
+
+/* ─── Aviso para instalar la app ─────────────────────────────────────────── */
+
+function PasoInstalar({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <li className="flex items-center gap-3">
+      <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+        style={{ background: 'var(--subtle)', color: 'var(--fg)' }}>{n}</span>
+      <span className="text-sm flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--fg)' }}>{children}</span>
+    </li>
+  )
+}
+
+function InstallSheet({ modo, onInstalar, onCerrar }: { modo: Exclude<ModoInstalar, null>; onInstalar: () => void; onCerrar: () => void }) {
+  return (
+    <>
+      <div className="absolute inset-0 bg-black/50 z-40 fade-in" onClick={onCerrar} aria-hidden="true" />
+      <div role="dialog" aria-modal="true" aria-label="Instalar Saldo"
+        className="absolute bottom-0 left-0 right-0 z-50 rounded-t-3xl px-5 pt-3 sheet-up"
+        style={{ background: 'var(--bg)', paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
+        <div className="flex justify-center pb-3"><div className="w-10 h-1 rounded-full" style={{ background: 'var(--border)' }} /></div>
+        <div className="flex items-center gap-4 mb-4">
+          <LogoSaldo size={56} />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xl font-bold leading-tight" style={{ fontFamily: '"DM Serif Display", serif', color: 'var(--fg)' }}>Instalá Saldo en tu celular</h3>
+            <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Queda con su ícono en la pantalla, abre al toque y funciona sin señal.</p>
+          </div>
+        </div>
+        {modo === 'boton' && (
+          <Btn onClick={onInstalar}><span className="inline-flex items-center gap-2"><IconoDescargar /> Instalar app</span></Btn>
+        )}
+        {modo === 'ios' && (
+          <ol className="flex flex-col gap-3 rounded-2xl p-4 mb-1" style={{ background: 'var(--card)' }}>
+            <PasoInstalar n={1}>Tocá <b className="inline-flex items-center gap-1">Compartir <IconoCompartirIOS /></b> en la barra del navegador</PasoInstalar>
+            <PasoInstalar n={2}>Elegí <b className="inline-flex items-center gap-1">Agregar a inicio <IconoAgregarInicio /></b></PasoInstalar>
+            <PasoInstalar n={3}>Tocá <b>Agregar</b> arriba a la derecha</PasoInstalar>
+          </ol>
+        )}
+        {modo === 'android-manual' && (
+          <ol className="flex flex-col gap-3 rounded-2xl p-4 mb-1" style={{ background: 'var(--card)' }}>
+            <PasoInstalar n={1}>Abrí el menú del navegador <b className="inline-flex items-center"><IconoMenuAndroid /></b></PasoInstalar>
+            <PasoInstalar n={2}>Elegí <b>Instalar app</b> o <b>Agregar a pantalla principal</b></PasoInstalar>
+            <PasoInstalar n={3}>Confirmá con <b>Instalar</b></PasoInstalar>
+          </ol>
+        )}
+        <button onClick={onCerrar} className="w-full py-3.5 mt-2 text-sm font-semibold rounded-2xl active:scale-[0.98]" style={{ color: 'var(--muted)' }}>
+          {modo === 'boton' ? 'Ahora no' : 'Entendido'}
+        </button>
+      </div>
+    </>
   )
 }
 
@@ -810,16 +915,8 @@ function HomeScreen({ name, availableToday, todaySpent, dailyBudget, remainingDa
   return (
     <div className="flex-1 flex flex-col overflow-hidden screen-enter">
       {/* Header */}
-      <div className="px-5 pt-10 pb-2 flex items-center justify-between flex-shrink-0">
-        <button onClick={onOpenMenu} aria-label="Abrir menú"
-          className="w-10 h-10 flex items-center justify-center rounded-full transition-all duration-150 active:scale-[0.90] -ml-2"
-          style={{ color: 'var(--fg)' }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--subtle)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-          <svg width="22" height="15" viewBox="0 0 22 15" fill="none">
-            <path d="M1 1.5H21M1 7.5H14M1 13.5H21" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
-          </svg>
-        </button>
+      <div className="px-5 pt-6 pb-5 flex items-center justify-between gap-3 flex-shrink-0">
+        <p className="text-base font-semibold truncate" style={{ color: 'var(--fg)' }}>Hola{name ? `, ${name}` : ''}</p>
         <div className="flex items-center gap-1.5">
           <div className="text-right mr-1">
             <p className="text-xs capitalize" style={{ color: 'var(--muted)' }}>{dayName}</p>
@@ -848,14 +945,13 @@ function HomeScreen({ name, availableToday, todaySpent, dailyBudget, remainingDa
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-28">
-        <div className="flex items-center justify-between mb-5 gap-3">
-          <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>Hola{name ? `, ${name}` : ''}</p>
-          {sync && (
+      <div className="flex-1 overflow-y-auto px-5 pb-6">
+        {sync && (
+          <div className="mb-4">
             <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full" role="status"
               style={{ background: 'var(--subtle)', color: 'var(--muted)' }}>{sync}</span>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Hero number */}
         <div className="mb-8">
@@ -908,14 +1004,6 @@ function HomeScreen({ name, availableToday, todaySpent, dailyBudget, remainingDa
         </div>
       </div>
 
-      {/* FAB */}
-      <button onClick={onAddExpense} aria-label="Agregar gasto o ingreso"
-        className="absolute bottom-7 right-6 w-14 h-14 rounded-full bg-[#E8A33D] flex items-center justify-center transition-transform duration-150 active:scale-90 hover:scale-105 fab-animated"
-        style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-          <path d="M11 3V19M3 11H19" stroke={ON_ACCENT} strokeWidth="2.5" strokeLinecap="round"/>
-        </svg>
-      </button>
     </div>
   )
 }
@@ -933,6 +1021,7 @@ function ExpenseModal({ mov, onSave, onClose }: {
   const [concept, setConcept] = useState(mov?.item.concept ?? '')
   const [cat, setCat] = useState(mov?.kind === 'gasto' ? mov.item.category : 'otros')
   const [date, setDate] = useState(mov?.item.date ?? todayStr())
+  const [otraFecha, setOtraFecha] = useState(() => Boolean(mov && mov.item.date !== todayStr() && mov.item.date !== dateStr(1)))
   const [showNewCat, setShowNewCat] = useState(false)
   const [newCatLabel, setNewCatLabel] = useState('')
   const [amountError, setAmountError] = useState('')
@@ -1012,35 +1101,59 @@ function ExpenseModal({ mov, onSave, onClose }: {
             {amountError && <p id="expense-amount-error" className="text-xs text-red-500 mt-2" role="alert">{amountError}</p>}
           </div>
 
-          {/* Descripción y fecha */}
-          <div className="flex gap-2 mb-4">
-            <input type="text" value={concept} onChange={e => setConcept(e.target.value)}
-              placeholder={esIngreso ? 'De dónde vino (opcional)' : 'Descripción (opcional)'} aria-label="Descripción"
-              className="flex-1 min-w-0 rounded-xl px-4 py-3.5 text-base outline-none transition-all duration-200"
-              style={{ background: 'var(--card)', color: 'var(--fg)', border: '1.5px solid var(--border)' }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#E8A33D' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }} />
-            <input type="date" value={date} max={todayStr()} onChange={e => { setDate(e.target.value); setAmountError('') }} aria-label="Fecha"
-              className="w-[9.5rem] rounded-xl px-3 py-3.5 text-sm outline-none"
-              style={{ background: 'var(--card)', color: 'var(--fg)', border: '1.5px solid var(--border)', colorScheme: 'light dark' }} />
+          {/* Descripción */}
+          <input type="text" value={concept} onChange={e => setConcept(e.target.value)}
+            placeholder={esIngreso ? 'De dónde vino (opcional)' : 'Descripción (opcional)'} aria-label="Descripción"
+            className="w-full rounded-xl px-4 py-3.5 text-base outline-none transition-all duration-200 mb-3"
+            style={{ background: 'var(--card)', color: 'var(--fg)', border: '1.5px solid var(--border)' }}
+            onFocus={e => { e.currentTarget.style.borderColor = '#E8A33D' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }} />
+
+          {/* Fecha */}
+          <div className="flex gap-2 mb-4 items-center" role="group" aria-label="Fecha">
+            {[{ k: todayStr(), l: 'Hoy' }, { k: dateStr(1), l: 'Ayer' }].map(o => (
+              <button key={o.l} onClick={() => { setDate(o.k); setOtraFecha(false); setAmountError('') }} aria-pressed={date === o.k && !otraFecha}
+                className="px-4 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95"
+                style={{ background: date === o.k && !otraFecha ? 'var(--fg)' : 'var(--card)', color: date === o.k && !otraFecha ? 'var(--bg)' : 'var(--fg)' }}>
+                {o.l}
+              </button>
+            ))}
+            {otraFecha ? (
+              <input type="date" value={date} max={todayStr()} onChange={e => { setDate(e.target.value); setAmountError('') }} aria-label="Elegir fecha" autoFocus
+                className="flex-1 min-w-0 rounded-full px-4 py-2 text-sm outline-none"
+                style={{ background: 'var(--card)', color: 'var(--fg)', border: '1.5px solid #E8A33D', colorScheme: 'light dark' }} />
+            ) : (
+              <button onClick={() => setOtraFecha(true)}
+                className="px-4 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95"
+                style={{ background: 'var(--card)', color: 'var(--muted)' }}>
+                Otra fecha
+              </button>
+            )}
           </div>
 
           {/* Categorías (solo gastos) */}
           {!esIngreso && (
             <>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {categories.map(c => (
-                  <button key={c.id} onClick={() => setCat(c.id)} aria-pressed={cat === c.id}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-150 active:scale-[0.95]"
-                    style={{
-                      background: cat === c.id ? 'var(--fg)' : 'var(--card)',
-                      color: cat === c.id ? 'var(--bg)' : 'var(--fg)',
-                      transform: cat === c.id ? 'scale(1.02)' : 'scale(1)',
-                    }}>
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: c.color }} />
-                    <span className="text-sm font-medium truncate">{c.label}</span>
-                  </button>
-                ))}
+              <p className="text-[12px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--muted)' }}>Categoría</p>
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                {categories.map(c => {
+                  const sel = cat === c.id
+                  return (
+                    <button key={c.id} onClick={() => setCat(c.id)} aria-pressed={sel} aria-label={c.label}
+                      className="flex flex-col items-center gap-1.5 px-1 py-2.5 rounded-2xl transition-all duration-150 active:scale-[0.94]"
+                      style={{
+                        background: sel ? c.color + '22' : 'var(--card)',
+                        boxShadow: sel ? `inset 0 0 0 2px ${c.color}` : 'none',
+                        color: 'var(--fg)',
+                      }}>
+                      <span className="w-9 h-9 rounded-full flex items-center justify-center"
+                        style={{ background: sel ? c.color : c.color + '22', color: sel ? '#FFFFFF' : c.color }}>
+                        <IconoCategoria id={CATS.some(x => x.id === c.id) ? c.id : 'otros'} size={18} />
+                      </span>
+                      <span className={`text-[11px] leading-tight text-center w-full truncate ${sel ? 'font-bold' : 'font-medium'}`}>{c.label}</span>
+                    </button>
+                  )
+                })}
               </div>
               {showNewCat ? (
                 <div className="flex gap-2 mb-3">
@@ -1077,7 +1190,7 @@ function ExpenseModal({ mov, onSave, onClose }: {
 /* ─── History screen ─────────────────────────────────────────────────────── */
 
 function HistoryScreen({ movs, onBack, onDelete, onEdit }: {
-  movs: Mov[]; onBack: () => void; onDelete: (mov: Mov) => void; onEdit: (mov: Mov) => void
+  movs: Mov[]; onBack?: () => void; onDelete: (mov: Mov) => void; onEdit: (mov: Mov) => void
 }) {
   const [cantidad, setCantidad] = useState(60)
   const groups: Record<string, Mov[]> = {}
@@ -1775,7 +1888,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
 
 function ReportsScreen({ expenses, incomes, shared, salary, fixedExpenses, debts, varEstimate, savingsGoal, payday, darkMode, onBack }: {
   expenses: Expense[]; incomes: Income[]; shared: SharedExpense[]; salary: number; fixedExpenses: FixedExpense[]; debts: Debt[]
-  varEstimate: number; savingsGoal: number; payday: number; darkMode: boolean; onBack: () => void
+  varEstimate: number; savingsGoal: number; payday: number; darkMode: boolean; onBack?: () => void
 }) {
   const [tab, setTab] = useState('Semana')
   const { categories } = useCategories()
@@ -2398,6 +2511,8 @@ export default function App() {
   const [editingMov,   setEditingMov]    = useState<Mov | null>(null)
   const [showMenu,     setShowMenu]      = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Mov | null>(null)
+  const inst = useInstalar()
+  const [verInstalar, setVerInstalar] = useState(false)
 
   // Botón "atrás" del celular: vuelve al inicio en vez de salir de la app
   useEffect(() => {
@@ -2489,6 +2604,25 @@ export default function App() {
 
   const terminarOnboarding = () => { setPerfil({ onboardingDone: true }); setScreen('home') }
 
+  // Barra inferior en las pantallas principales
+  const listoParaUsar = Boolean(user) && nube.estado === 'listo' && perfil.onboardingDone && !recuperando
+  const conBarra = listoParaUsar && (screen === 'home' || screen === 'history' || screen === 'reports')
+  const irTab = (t: Tab) => {
+    if (t === screen) return
+    if (t === 'home') volver()
+    else goTo(t)
+  }
+
+  // Aviso de instalación: al abrir en el celular (en el ingreso o en el inicio), sin interrumpir la configuración
+  const momentoAviso = authListo && !recuperando && (!user || (listoParaUsar && screen === 'home')) && !showModal && !showMenu
+  useEffect(() => {
+    if (!inst.mostrarAviso || !momentoAviso) return
+    const t = setTimeout(() => setVerInstalar(true), 1200)
+    return () => clearTimeout(t)
+  }, [inst.mostrarAviso, momentoAviso])
+  const cerrarInstalar = () => { inst.cerrar(); setVerInstalar(false) }
+  const hacerInstalar = async () => { await inst.instalar(); setVerInstalar(false) }
+
   const sync = !nube.online
     ? (nube.pendientes > 0 ? 'Sin conexión · se guarda al volver' : 'Sin conexión')
     : nube.pendientes > 0 ? 'Guardando…' : null
@@ -2524,7 +2658,7 @@ export default function App() {
             onAddExpense={openNew} onOpenMenu={() => setShowMenu(true)}
             onOpenNotifications={() => goTo('notifications')} onDelete={setPendingDelete} onEdit={openEdit} />
         )}
-        {screen === 'history' && <HistoryScreen movs={movs} onBack={volver} onDelete={setPendingDelete} onEdit={openEdit} />}
+        {screen === 'history' && <HistoryScreen movs={movs} onDelete={setPendingDelete} onEdit={openEdit} />}
         {screen === 'fixed' && (
           <FixedScreen fixedExpenses={fixedExpenses} setFixedExpenses={v => setLista('fixedExpenses', v)}
             debts={debts} setDebts={v => setLista('debts', v)} cycleKey={budget.startKey} onBack={volver} />
@@ -2541,7 +2675,7 @@ export default function App() {
         {screen === 'reports' && (
           <ReportsScreen expenses={expenses} incomes={incomes} shared={shared} salary={perfil.salary} fixedExpenses={fixedExpenses}
             debts={debts} varEstimate={perfil.varEstimate} savingsGoal={perfil.savingsGoal} payday={perfil.payday}
-            darkMode={darkMode} onBack={volver} />
+            darkMode={darkMode} />
         )}
         {screen === 'import' && <ImportScreen expenses={expenses} incomes={incomes} onImport={importMovs} onBack={volver} />}
         {screen === 'notifications' && (
@@ -2552,7 +2686,8 @@ export default function App() {
         )}
 
         {showModal && <ExpenseModal mov={editingMov} onSave={saveMov} onClose={closeModal} />}
-        {showMenu && <MenuDrawer name={perfil.name} email={user.email ?? ''} darkMode={darkMode} onToggleDark={toggleDark} onNavigate={goTo} onClose={() => setShowMenu(false)} onLogout={() => void cerrarSesion()} />}
+        {showMenu && <MenuDrawer name={perfil.name} email={user.email ?? ''} darkMode={darkMode} onToggleDark={toggleDark} onNavigate={goTo} onClose={() => setShowMenu(false)} onLogout={() => void cerrarSesion()}
+          onInstall={inst.modo ? () => { setShowMenu(false); setVerInstalar(true) } : undefined} />}
         {pendingDelete && (
           <ConfirmDialog
             title={pendingDelete.kind === 'gasto' ? '¿Eliminar este gasto?' : '¿Eliminar este ingreso?'}
@@ -2568,9 +2703,11 @@ export default function App() {
 
   return (
     <CategoryContext.Provider value={{ categories, addCategory }}>
-      <div className={`app-shell size-full overflow-hidden flex flex-col relative transition-colors duration-300 ${darkMode ? 'dark' : ''}`}
+      <div className={`app-shell size-full overflow-hidden flex flex-col relative transition-colors duration-300 ${conBarra ? '' : 'pb-safe'} ${darkMode ? 'dark' : ''}`}
         style={{ background: 'var(--bg)' }}>
-        {contenido}
+        <div className="flex-1 min-h-0 flex flex-col">{contenido}</div>
+        {conBarra && <BottomNav actual={screen} onTab={irTab} onAdd={openNew} onMenu={() => setShowMenu(true)} />}
+        {verInstalar && inst.modo && <InstallSheet modo={inst.modo} onInstalar={() => void hacerInstalar()} onCerrar={cerrarInstalar} />}
       </div>
     </CategoryContext.Provider>
   )
