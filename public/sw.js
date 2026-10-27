@@ -3,7 +3,7 @@
    - Archivos de la app (js/css/íconos, con nombre que cambia en cada versión): copia guardada.
    - Tipografías de Google: copia guardada y se actualiza en segundo plano.
    - Supabase (datos y login) nunca se guarda acá: lo maneja la app. */
-const VERSION = 'saldo-v2'
+const VERSION = 'saldo-v3'
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png']
 
 self.addEventListener('install', e => {

@@ -19,6 +19,8 @@ const USER_ID = '9b2f0c4e-1a2b-4c3d-8e9f-0a1b2c3d4e5f'
 const db = {}                // tabla → Map(clave → fila)
 const users = {}             // email → { password, id, nombre }
 let offline = false
+let licencia = false
+const codigosLibres = new Map([['SALDO-ABCD-EFGH', null]])
 let restLog = []
 const tabla = t => (db[t] ||= new Map())
 const session = (u) => ({
@@ -51,7 +53,25 @@ async function supabaseMock(route) {
   if (path === '/auth/v1/logout') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } })
   if (path === '/auth/v1/recover') return json(route, 200, {})
 
+  if (path === '/rest/v1/rpc/saldo_estado') return json(route, 200, { licencia, admin: true })
+  if (path === '/rest/v1/rpc/saldo_activar') {
+    const c = String(body.p_codigo).toUpperCase().replace(/[^A-Z0-9]/g, '')
+    const k = [...codigosLibres.keys()].find(x => x.replace(/-/g, '') === c)
+    if (!k) return json(route, 200, { ok: false, error: 'invalido' })
+    if (codigosLibres.get(k)) return json(route, 200, { ok: false, error: 'usado' })
+    codigosLibres.set(k, new Date().toISOString()); licencia = true
+    return json(route, 200, { ok: true })
+  }
+  if (path === '/rest/v1/rpc/saldo_generar_codigos') {
+    const nuevos = Array.from({ length: body.p_cantidad }, (_, i) => `SALDO-NUEV-${String(codigosLibres.size + i).padStart(4, '2')}`)
+    nuevos.forEach(c => codigosLibres.set(c, null))
+    return json(route, 200, nuevos)
+  }
+  if (path === '/rest/v1/saldo_codigos') {
+    return json(route, 200, [...codigosLibres.entries()].map(([codigo, usado_en], i) => ({ codigo, nota: null, creado_en: new Date(Date.now() - i * 1000).toISOString(), usado_en })))
+  }
   if (path === '/rest/v1/rpc/saldo_borrar_cuenta') {
+    licencia = false
     for (const t of Object.keys(db)) db[t].clear()
     for (const k of Object.keys(users)) delete users[k]
     return json(route, 200, null)
@@ -91,7 +111,7 @@ async function supabaseMock(route) {
 
 /* ─── Recorrido ─── */
 const browser = await chromium.launch()
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'es-AR', timezoneId: 'America/Argentina/Buenos_Aires' })
+const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'es-AR', timezoneId: 'America/Argentina/Buenos_Aires', permissions: ['clipboard-read', 'clipboard-write'] })
 await ctx.route(SUPA + '/**', supabaseMock)
 await ctx.route('https://fonts.googleapis.com/**', r => r.fulfill({ status: 200, contentType: 'text/css', body: '' }))
 const page = await ctx.newPage()
@@ -126,7 +146,17 @@ await page.getByRole('button', { name: 'Crear cuenta' }).click()
 check('Pide contraseña de 8 con letras y números', (await txt()).includes('al menos 8 caracteres'))
 await page.getByLabel('Contraseña').fill('Segura123')
 await page.getByRole('button', { name: 'Crear cuenta' }).click()
+await page.getByText('Activá tu cuenta').waitFor()
+check('Cuenta nueva sin código: pide activación antes de usar la app', true)
+await shot('00_activacion')
+await page.getByLabel('Código de activación').fill('SALDO-XXXX-YYYY')
+await page.getByRole('button', { name: 'Activar' }).click()
+await page.getByText('Ese código no existe').waitFor()
+check('Código inválido: mensaje claro', true)
+await page.getByLabel('Código de activación').fill('saldo abcd efgh')
+await page.getByRole('button', { name: 'Activar' }).click()
 await page.getByText('Paso 1 de 6').waitFor()
+check('Código válido (escrito en minúscula y sin guiones): pasa a la configuración', true)
 check('Registro lleva a la configuración inicial', true)
 
 console.log('\n▶ Configuración inicial (montos con punto de miles)')
@@ -307,6 +337,21 @@ await esperar(1500)
 check('Importa el débito como gasto ($4.350)', [...tabla('saldo_gastos').values()].some(x => x.monto === 4350 && x.categoria === 'comida'))
 check('Importa el crédito elegido como ingreso ($12.000)', [...tabla('saldo_ingresos').values()].some(x => x.monto === 12000))
 await page.getByRole('button', { name: 'Volver al inicio' }).click()
+
+console.log('\n▶ Códigos de activación (administrador)')
+await page.getByRole('button', { name: 'Más opciones' }).click()
+await page.locator('.drawer-in').getByRole('button', { name: 'Códigos de activación' }).click()
+await page.getByText('Disponibles', { exact: true }).waitFor()
+check('El administrador ve la pantalla de códigos', true)
+await page.getByRole('button', { name: '+ 1 código' }).click()
+await page.getByText('SALDO-NUEV-').first().waitFor()
+check('Genera un código nuevo y aparece en la lista', true)
+await shot('14_codigos')
+await page.getByRole('button', { name: 'Copiar mensaje' }).first().click()
+const portapapeles = await page.evaluate(() => navigator.clipboard.readText())
+check('"Copiar mensaje" copia el código, el link y los pasos', /SALDO-NUEV-\d+/.test(portapapeles) && portapapeles.includes('online-m-glitch.github.io/saldo-app') && portapapeles.includes('Registrate'), portapapeles.slice(0, 120))
+check('El código usado no aparece como disponible', !(await txt()).includes('SALDO-ABCD-EFGH'))
+await page.getByRole('button', { name: 'Volver' }).click()
 
 console.log('\n▶ Volver a entrar (datos desde la nube)')
 await page.getByRole('button', { name: 'Más opciones' }).click()

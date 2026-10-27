@@ -10,6 +10,8 @@ import {
 import { supabase, redirectUrl, errorAuth } from './lib/supabase'
 import { useNube, borrarLocal } from './lib/store'
 import { useInstalar, type ModoInstalar } from './lib/instalar'
+import { useLicencia, borrarLicenciaLocal, mensajeParaComprador } from './lib/licencia'
+import { APP_URL } from './lib/config'
 import {
   BadgeCategoria, IconoCategoria, IconoInicio, IconoHistorial, IconoReportes, IconoMas,
   IconoDescargar, IconoCompartirIOS, IconoAgregarInicio, IconoMenuAndroid,
@@ -697,8 +699,8 @@ function OnboardingScreen({
 
 /* ─── Menu drawer ────────────────────────────────────────────────────────── */
 
-function MenuDrawer({ name, email, darkMode, onToggleDark, onNavigate, onClose, onLogout, onInstall }: {
-  name: string; email: string; darkMode: boolean; onToggleDark: () => void; onInstall?: () => void
+function MenuDrawer({ name, email, darkMode, onToggleDark, onNavigate, onClose, onLogout, onInstall, admin = false }: {
+  name: string; email: string; darkMode: boolean; onToggleDark: () => void; onInstall?: () => void; admin?: boolean
   onNavigate: (s: Screen) => void; onClose: () => void; onLogout: () => void
 }) {
   const items: { icon: React.ReactNode; label: string; screen: Screen }[] = [
@@ -710,6 +712,7 @@ function MenuDrawer({ name, email, darkMode, onToggleDark, onNavigate, onClose, 
     { icon: <IconReports />,  label: 'Reportes',           screen: 'reports'       },
     { icon: <IconImport />,   label: 'Importar extracto',  screen: 'import'        },
     { icon: <IconBell />,     label: 'Notificaciones',     screen: 'notifications' },
+    ...(admin ? [{ icon: <IconoLlave />, label: 'Códigos de activación', screen: 'codigos' as Screen }] : []),
   ]
   return (
     <>
@@ -2433,6 +2436,156 @@ function NotificationsScreen({ notifications, readIds, darkMode, onMarkRead, onM
   )
 }
 
+/* ─── Activación con código ─────────────────────────────────────────────── */
+
+const IconoLlave = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="8" cy="15" r="4" /><path d="m11 12 8-8M16 7l2 2M14 9l2 2" />
+  </svg>
+)
+
+function ActivacionScreen({ email, onActivar, onLogout }: {
+  email: string; onActivar: (codigo: string) => Promise<string | null>; onLogout: () => void
+}) {
+  const [codigo, setCodigo] = useState('')
+  const [error, setError] = useState('')
+  const [cargando, setCargando] = useState(false)
+  const enviar = async () => {
+    const limpio = codigo.trim()
+    if (limpio.replace(/[^A-Za-z0-9]/g, '').length < 8) { setError('Escribí el código completo, por ejemplo SALDO-AB12-CD34.'); return }
+    setCargando(true); setError('')
+    const e = await onActivar(limpio)
+    setCargando(false)
+    if (e) setError(e)
+  }
+  return (
+    <div className="flex-1 flex flex-col px-6 pt-16 pb-8 overflow-y-auto screen-enter">
+      <div className="mb-8">
+        <div className="mb-6 w-fit"><LogoSaldo /></div>
+        <p className="text-xs font-semibold text-[#E8A33D] uppercase tracking-widest mb-2">Un paso más</p>
+        <h1 className="text-[34px] font-bold leading-tight" style={{ fontFamily: '"DM Serif Display", serif', fontStyle: 'italic', color: 'var(--fg)' }}>Activá tu cuenta.</h1>
+        <p className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--muted)' }}>
+          Ingresá el código de activación que recibiste después de tu compra. Se usa una sola vez y la app queda tuya para siempre.
+        </p>
+      </div>
+      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); void enviar() }} noValidate>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="codigo-activacion" className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: 'var(--muted)' }}>Código de activación</label>
+          <input id="codigo-activacion" value={codigo} onChange={e => { setCodigo(e.target.value.toUpperCase()); setError('') }}
+            placeholder="SALDO-XXXX-XXXX" autoCapitalize="characters" autoComplete="one-time-code" autoCorrect="off" spellCheck={false}
+            className="w-full rounded-xl px-4 py-4 text-lg font-bold tracking-[0.12em] text-center outline-none"
+            style={{ background: 'var(--input-bg)', color: 'var(--fg)', border: `1.5px solid ${error ? '#EF4444' : 'var(--border)'}` }} />
+        </div>
+        {error && <p className="text-sm text-red-500 text-center" role="alert">{error}</p>}
+        <Btn type="submit" disabled={cargando}>{cargando ? 'Verificando…' : 'Activar'}</Btn>
+      </form>
+      <div className="mt-auto pt-10 text-center">
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>{email ? `Entraste como ${email}` : ''}</p>
+        <button onClick={onLogout} className="text-sm font-semibold mt-2 text-[#E8A33D]">Usar otra cuenta</button>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Códigos de activación (solo administrador) ─────────────────────────── */
+
+interface CodigoFila { codigo: string; nota: string | null; creado_en: string; usado_en: string | null }
+
+function CodigosScreen({ onBack }: { onBack: () => void }) {
+  const [filas, setFilas] = useState<CodigoFila[] | null>(null)
+  const [error, setError] = useState('')
+  const [generando, setGenerando] = useState(false)
+  const [copiado, setCopiado] = useState('')
+  const [verUsados, setVerUsados] = useState(false)
+
+  const cargar = async () => {
+    const { data, error: e } = await supabase.from('saldo_codigos').select('codigo,nota,creado_en,usado_en').order('creado_en', { ascending: false }).limit(500)
+    if (e) { setError('No se pudieron cargar los códigos. Revisá tu conexión.'); return }
+    setError(''); setFilas(data as CodigoFila[])
+  }
+  useEffect(() => { void cargar() }, [])
+
+  const generar = async (n: number) => {
+    setGenerando(true)
+    const { error: e } = await supabase.rpc('saldo_generar_codigos', { p_cantidad: n, p_nota: null })
+    setGenerando(false)
+    if (e) { setError('No se pudieron generar. Probá de nuevo.'); return }
+    await cargar()
+  }
+  const copiar = async (texto: string, id: string) => {
+    try { await navigator.clipboard.writeText(texto) } catch {
+      const t = document.createElement('textarea'); t.value = texto; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove()
+    }
+    setCopiado(id); setTimeout(() => setCopiado(c => (c === id ? '' : c)), 1800)
+  }
+
+  const libres = (filas ?? []).filter(f => !f.usado_en)
+  const usados = (filas ?? []).filter(f => f.usado_en)
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden screen-enter">
+      <PageHeader title="Códigos de activación" onBack={onBack} />
+      <div className="flex-1 overflow-y-auto px-5 pb-8">
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="rounded-2xl px-4 py-4" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-sm)' }}>
+            <p className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: 'var(--muted)' }}>Disponibles</p>
+            <p className="text-2xl font-bold mt-1" style={{ fontFamily: '"DM Serif Display", serif', color: 'var(--fg)' }}>{filas ? libres.length : '…'}</p>
+          </div>
+          <div className="rounded-2xl px-4 py-4" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-sm)' }}>
+            <p className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: 'var(--muted)' }}>Activados</p>
+            <p className="text-2xl font-bold mt-1" style={{ fontFamily: '"DM Serif Display", serif', color: 'var(--fg)' }}>{filas ? usados.length : '…'}</p>
+          </div>
+        </div>
+        <div className="flex gap-2 mb-2">
+          <Btn onClick={() => void generar(1)} disabled={generando} className="py-3">+ 1 código</Btn>
+          <Btn variant="ghost" onClick={() => void generar(10)} disabled={generando} className="py-3">+ 10 códigos</Btn>
+        </div>
+        <p className="text-xs mb-5" style={{ color: 'var(--muted)' }}>
+          Después de cada venta, tocá <b>Copiar mensaje</b> y pegalo en la mensajería de la venta. Cada código activa una sola cuenta.
+        </p>
+        {error && <p className="text-sm text-red-500 mb-4" role="alert">{error}</p>}
+        {filas && libres.length === 0 && (
+          <p className="text-sm text-center py-6" style={{ color: 'var(--muted)' }}>No hay códigos disponibles. Generá uno.</p>
+        )}
+        <div className="rounded-2xl overflow-hidden mb-6" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-sm)' }}>
+          {libres.map((f, i) => (
+            <div key={f.codigo} className="px-4 py-3.5" style={{ borderBottom: i < libres.length - 1 ? '1px solid var(--divider)' : 'none' }}>
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-[17px] font-bold tracking-wider whitespace-nowrap" style={{ color: 'var(--fg)', fontFamily: 'ui-monospace, Menlo, monospace' }}>{f.codigo}</p>
+                <p className="text-xs whitespace-nowrap" style={{ color: 'var(--muted)' }}>{fmtDate(f.creado_en.slice(0, 10))}</p>
+              </div>
+              <div className="flex gap-2 mt-2.5">
+                <button onClick={() => void copiar(mensajeParaComprador(f.codigo, APP_URL), 'm' + f.codigo)} className="flex-1 text-sm font-semibold px-3 py-2.5 rounded-xl bg-[#E8A33D]" style={{ color: ON_ACCENT }}>
+                  {copiado === 'm' + f.codigo ? '¡Copiado!' : 'Copiar mensaje'}
+                </button>
+                <button onClick={() => void copiar(f.codigo, 'c' + f.codigo)} className="text-sm font-semibold px-4 py-2.5 rounded-xl" style={{ background: 'var(--subtle)', color: 'var(--fg)' }}>
+                  {copiado === 'c' + f.codigo ? '¡Copiado!' : 'Solo el código'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {usados.length > 0 && (
+          <>
+            <button onClick={() => setVerUsados(v => !v)} className="text-sm font-semibold mb-3" style={{ color: 'var(--muted)' }}>
+              {verUsados ? 'Ocultar' : 'Ver'} códigos ya activados ({usados.length})
+            </button>
+            {verUsados && (
+              <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--card)' }}>
+                {usados.map((f, i) => (
+                  <div key={f.codigo} className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: i < usados.length - 1 ? '1px solid var(--divider)' : 'none' }}>
+                    <span className="text-sm tabular-nums line-through" style={{ color: 'var(--muted)', fontFamily: 'ui-monospace, Menlo, monospace' }}>{f.codigo}</span>
+                    <span className="text-xs" style={{ color: 'var(--muted)' }}>activado el {fmtDate(f.usado_en!.slice(0, 10))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ─── Pantallas de espera ────────────────────────────────────────────────── */
 
 function Splash({ texto }: { texto?: string }) {
@@ -2502,6 +2655,7 @@ export default function App() {
   const user = session?.user ?? null
   const nombreInicial = String(user?.user_metadata?.nombre ?? '')
   const nube = useNube(user?.id ?? null, nombreInicial)
+  const lic = useLicencia(user?.id ?? null)
   const { datos, setPerfil, setLista } = nube
   const { perfil, expenses, incomes, fixedExpenses, debts, children, people, shared } = datos
 
@@ -2588,7 +2742,7 @@ export default function App() {
   const cerrarSesion = async () => {
     const todoSubido = await nube.subirAntesDeSalir()
     if (!todoSubido && !window.confirm('Hay cambios que todavía no se guardaron en la nube porque no hay conexión. Si cerrás sesión ahora, se pierden. ¿Cerrar igual?')) return
-    if (user) borrarLocal(user.id)
+    if (user) { borrarLocal(user.id); borrarLicenciaLocal(user.id) }
     setShowMenu(false); setShowModal(false); setEditingMov(null); setScreen('home'); setOnbStep(1); setAuthModo('login')
     await supabase.auth.signOut()
   }
@@ -2596,7 +2750,7 @@ export default function App() {
   const borrarCuenta = async (): Promise<string | null> => {
     const { error } = await supabase.rpc('saldo_borrar_cuenta')
     if (error) return 'No se pudo eliminar la cuenta. Revisá tu conexión y probá de nuevo.'
-    if (user) borrarLocal(user.id)
+    if (user) { borrarLocal(user.id); borrarLicenciaLocal(user.id) }
     setScreen('home'); setOnbStep(1); setAuthModo('login')
     await supabase.auth.signOut()
     return null
@@ -2605,7 +2759,7 @@ export default function App() {
   const terminarOnboarding = () => { setPerfil({ onboardingDone: true }); setScreen('home') }
 
   // Barra inferior en las pantallas principales
-  const listoParaUsar = Boolean(user) && nube.estado === 'listo' && perfil.onboardingDone && !recuperando
+  const listoParaUsar = Boolean(user) && lic.estado === 'si' && nube.estado === 'listo' && perfil.onboardingDone && !recuperando
   const conBarra = listoParaUsar && (screen === 'home' || screen === 'history' || screen === 'reports')
   const irTab = (t: Tab) => {
     if (t === screen) return
@@ -2631,6 +2785,12 @@ export default function App() {
   if (!authListo) contenido = <Splash />
   else if (recuperando && user) contenido = <NewPasswordScreen onDone={() => { setRecuperando(false); history.replaceState(null, '', window.location.pathname) }} />
   else if (!user) contenido = <LoginScreen modo={authModo} setModo={setAuthModo} avisoInicial={avisoLink} />
+  else if (lic.estado === 'cargando') contenido = <Splash texto="Verificando tu cuenta…" />
+  else if (lic.estado === 'error') contenido = <ErrorCarga onRetry={() => void lic.reintentar()} onLogout={() => void cerrarSesion()} />
+  else if (lic.estado === 'no') contenido = (
+    <ActivacionScreen email={user.email ?? ''} onLogout={() => void cerrarSesion()}
+      onActivar={async c => { const e = await lic.activar(c); if (!e) await nube.recargar(); return e }} />
+  )
   else if (nube.estado === 'cargando') contenido = <Splash texto="Cargando tus datos…" />
   else if (nube.estado === 'error') contenido = <ErrorCarga onRetry={() => void nube.recargar()} onLogout={() => void cerrarSesion()} />
   else if (!perfil.onboardingDone) {
@@ -2678,6 +2838,7 @@ export default function App() {
             darkMode={darkMode} />
         )}
         {screen === 'import' && <ImportScreen expenses={expenses} incomes={incomes} onImport={importMovs} onBack={volver} />}
+        {screen === 'codigos' && lic.admin && <CodigosScreen onBack={volver} />}
         {screen === 'notifications' && (
           <NotificationsScreen
             notifications={notifications} readIds={readIds} darkMode={darkMode}
@@ -2687,7 +2848,7 @@ export default function App() {
 
         {showModal && <ExpenseModal mov={editingMov} onSave={saveMov} onClose={closeModal} />}
         {showMenu && <MenuDrawer name={perfil.name} email={user.email ?? ''} darkMode={darkMode} onToggleDark={toggleDark} onNavigate={goTo} onClose={() => setShowMenu(false)} onLogout={() => void cerrarSesion()}
-          onInstall={inst.modo ? () => { setShowMenu(false); setVerInstalar(true) } : undefined} />}
+          onInstall={inst.modo ? () => { setShowMenu(false); setVerInstalar(true) } : undefined} admin={lic.admin} />}
         {pendingDelete && (
           <ConfirmDialog
             title={pendingDelete.kind === 'gasto' ? '¿Eliminar este gasto?' : '¿Eliminar este ingreso?'}

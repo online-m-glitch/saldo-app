@@ -5,7 +5,7 @@
 export type Screen =
   | 'login' | 'onboarding' | 'home' | 'history'
   | 'fixed' | 'profile' | 'children'
-  | 'shared' | 'reports' | 'import' | 'notifications'
+  | 'shared' | 'reports' | 'import' | 'notifications' | 'codigos'
 
 export interface FixedExpense {
   id: string; name: string; amount: number; dueDay: number; active: boolean; lastPaidCycle?: string
